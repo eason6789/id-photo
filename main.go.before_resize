@@ -1,0 +1,442 @@
+package main
+
+import (
+	"bytes"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+const (
+	Port       = ":8080"
+	UploadDir  = "/var/www/html/claw/api/data/uploads/"
+	ResultDir  = "/var/www/html/claw/api/data/results/"
+	AdminPwd   = "YOUR_ADMIN_PWD"
+)
+
+type Token struct {
+	Remaining  int    `json:"remaining"`
+	MaxUses    int    `json:"max_uses"`
+	CreatedAt  int64  `json:"created_at"`
+	ExpiresAt  int64  `json:"expires_at"`
+	UsedCount  int    `json:"used_count"`
+	LastUsed   int64  `json:"last_used"`
+	Disabled   bool   `json:"disabled"`
+	OrderID    string `json:"order_id,omitempty"`
+}
+
+var logger *log.Logger
+
+func init() {
+	logger = log.New(os.Stdout, "[PHOTO-SERVICE] ", log.LstdFlags|log.Lshortfile)
+	
+	if err := initDB(); err != nil {
+		logger.Fatalf("数据库初始化失败: %v", err)
+	}
+}
+
+func generateTokenID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return "PHOTO_" + base64.URLEncoding.EncodeToString(b)[:22]
+}
+
+func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		
+		next(w, r)
+	}
+}
+
+func jsonResp(w http.ResponseWriter, success bool, msg string, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": success,
+		"message": msg,
+		"data":    data,
+	})
+}
+
+func verifyToken(w http.ResponseWriter, r *http.Request) {
+	logger.Printf("[%s] verify-token 请求 from %s", r.Method, r.RemoteAddr)
+	
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		logger.Printf("Token为空")
+		jsonResp(w, false, "Token不能为空", nil)
+		return
+	}
+	
+	tok, err := verifyTokenFromDB(token)
+	if err != nil {
+		logger.Printf("Token验证失败: %v", err)
+		jsonResp(w, false, err.Error(), nil)
+		return
+	}
+	
+	logger.Printf("Token验证成功: %s, 剩余次数: %d, 订单号: %s", token[:20]+"...", tok.Remaining, tok.OrderID)
+	jsonResp(w, true, "ok", map[string]interface{}{
+		"remaining":  tok.Remaining,
+		"max_uses":   tok.MaxUses,
+		"order_id":   tok.OrderID,
+		"expires_at": tok.ExpiresAt,
+	})
+}
+
+func createToken(w http.ResponseWriter, r *http.Request) {
+	logger.Printf("[%s] create-token 请求 from %s", r.Method, r.RemoteAddr)
+	
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	password := r.URL.Query().Get("password")
+	if password != AdminPwd {
+		logger.Printf("管理员密码错误")
+		jsonResp(w, false, "管理员密码错误", nil)
+		return
+	}
+	
+	var req struct {
+		MaxUses int    `json:"max_uses"`
+		OrderID string `json:"order_id"`
+		Days    int    `json:"days"`
+	}
+	
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Printf("解析请求失败: %v", err)
+		jsonResp(w, false, "请求解析失败", nil)
+		return
+	}
+	
+	if req.MaxUses <= 0 {
+		req.MaxUses = 10
+	}
+	
+	if req.Days <= 0 {
+		req.Days = 30
+	}
+	
+	tokenID := generateTokenID()
+	now := time.Now()
+	expiresAt := now.Add(time.Duration(req.Days) * 24 * time.Hour)
+	
+	_, err := db.Exec(`
+		INSERT INTO tokens (token, order_id, max_uses, used_count, expires_at, status, note)
+		VALUES (?, ?, ?, 0, ?, 1, '手动创建')
+	`, tokenID, nullString(req.OrderID), req.MaxUses, expiresAt)
+	
+	if err != nil {
+		logger.Printf("创建Token失败: %v", err)
+		jsonResp(w, false, "创建Token失败", nil)
+		return
+	}
+	
+	logger.Printf("创建Token成功: %s, 订单号: %s, 次数: %d, 有效期: %d天",
+		tokenID[:20]+"...", req.OrderID, req.MaxUses, req.Days)
+	
+	jsonResp(w, true, "Token创建成功", map[string]interface{}{
+		"token":        tokenID,
+		"max_uses":     req.MaxUses,
+		"order_id":     req.OrderID,
+		"expires_days": req.Days,
+		"expires_at":   expiresAt.Unix(),
+	})
+}
+
+func generatePhoto(w http.ResponseWriter, r *http.Request) {
+	logger.Printf("[%s] generate-photo 请求 from %s", r.Method, r.RemoteAddr)
+	
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	token := r.FormValue("token")
+	spec := r.FormValue("spec")
+	gender := r.FormValue("gender")
+	
+	if spec == "" {
+		spec = "standard_35x45"
+	}
+	if gender == "" {
+		gender = "female"
+	}
+	
+	tok, err := verifyTokenFromDB(token)
+	if err != nil {
+		logger.Printf("Token验证失败: %v", err)
+		jsonResp(w, false, err.Error(), nil)
+		return
+	}
+	
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		logger.Printf("文件上传失败: %v", err)
+		jsonResp(w, false, "文件上传失败", nil)
+		return
+	}
+	defer file.Close()
+	
+	if err := os.MkdirAll(UploadDir, 0755); err != nil {
+		logger.Printf("创建上传目录失败: %v", err)
+		jsonResp(w, false, "服务错误", nil)
+		return
+	}
+	if err := os.MkdirAll(ResultDir, 0755); err != nil {
+		logger.Printf("创建结果目录失败: %v", err)
+		jsonResp(w, false, "服务错误", nil)
+		return
+	}
+	
+	timestamp := time.Now().Unix()
+	randomID := randomString(16)
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext == "" || (ext != ".jpg" && ext != ".jpeg" && ext != ".png") {
+		ext = ".jpg"
+	}
+	
+	uploadPath := fmt.Sprintf("%d_%s%s", timestamp, randomID, ext)
+	uploadFullPath := UploadDir + uploadPath
+	
+	outFile, err := os.Create(uploadFullPath)
+	if err != nil {
+		logger.Printf("创建上传文件失败: %v", err)
+		jsonResp(w, false, "文件保存失败", nil)
+		return
+	}
+	
+	if _, err := io.Copy(outFile, file); err != nil {
+		logger.Printf("写入文件失败: %v", err)
+		outFile.Close()
+		os.Remove(uploadFullPath)
+		jsonResp(w, false, "文件保存失败", nil)
+		return
+	}
+	outFile.Close()
+	
+	logger.Printf("文件上传成功: %s, 大小: %d bytes", uploadPath, header.Size)
+	
+	photoSpecs := map[string]map[string]interface{}{
+		"cn_passport":      {"name": "中国护照", "w": 33, "h": 48, "dpi": 300, "bg": "#FFFFFF"},
+		"cn_id":            {"name": "中国身份证", "w": 26, "h": 32, "dpi": 300, "bg": "#FFFFFF"},
+		"cn_one_inch":      {"name": "一寸照片", "w": 25, "h": 35, "dpi": 300, "bg": "#FFFFFF"},
+		"cn_two_inch":      {"name": "二寸照片", "w": 35, "h": 49, "dpi": 300, "bg": "#FFFFFF"},
+		"cn_small_one_inch": {"name": "小一寸", "w": 22, "h": 32, "dpi": 300, "bg": "#FFFFFF"},
+		"cn_small_two_inch": {"name": "小二寸", "w": 35, "h": 45, "dpi": 300, "bg": "#FFFFFF"},
+		"cn_big_two_inch":   {"name": "大二寸", "w": 35, "h": 53, "dpi": 300, "bg": "#FFFFFF"},
+		"cn_one_inch_blue": {"name": "一寸蓝底", "w": 25, "h": 35, "dpi": 300, "bg": "#1E90FF"},
+		"cn_one_inch_red":  {"name": "一寸红底", "w": 25, "h": 35, "dpi": 300, "bg": "#FF0000"},
+		"cn_two_inch_blue": {"name": "二寸蓝底", "w": 35, "h": 49, "dpi": 300, "bg": "#1E90FF"},
+		"cn_two_inch_red":  {"name": "二寸红底", "w": 35, "h": 49, "dpi": 300, "bg": "#FF0000"},
+		"cn_driver_license": {"name": "驾驶证", "w": 22, "h": 32, "dpi": 300, "bg": "#FFFFFF"},
+		"us_passport":      {"name": "美国护照", "w": 51, "h": 51, "dpi": 300, "bg": "#FFFFFF"},
+		"us_visa":          {"name": "美国签证", "w": 51, "h": 51, "dpi": 300, "bg": "#FFFFFF"},
+		"jp_passport":      {"name": "日本护照", "w": 45, "h": 45, "dpi": 300, "bg": "#FFFFFF"},
+		"jp_visa":          {"name": "日本签证", "w": 45, "h": 45, "dpi": 300, "bg": "#FFFFFF"},
+		"jp_visa_rect":     {"name": "日本签证（矩形）", "w": 35, "h": 45, "dpi": 300, "bg": "#FFFFFF"},
+		"schengen_visa":    {"name": "申根签证", "w": 35, "h": 45, "dpi": 300, "bg": "#F0F0F0"},
+		"uk_passport":      {"name": "英国护照", "w": 35, "h": 45, "dpi": 300, "bg": "#F0F0F0"},
+		"de_passport":      {"name": "德国护照", "w": 35, "h": 45, "dpi": 300, "bg": "#E8E8E8"},
+		"fr_passport":      {"name": "法国护照", "w": 35, "h": 45, "dpi": 300, "bg": "#E8E8E8"},
+		"ca_passport":      {"name": "加拿大护照", "w": 50, "h": 70, "dpi": 300, "bg": "#FFFFFF"},
+		"au_passport":      {"name": "澳大利亚护照", "w": 35, "h": 45, "dpi": 300, "bg": "#FFFFFF"},
+		"kr_passport":      {"name": "韩国护照", "w": 35, "h": 45, "dpi": 300, "bg": "#FFFFFF"},
+		"sg_passport":      {"name": "新加坡护照", "w": 35, "h": 45, "dpi": 300, "bg": "#FFFFFF"},
+		"standard_35x45":   {"name": "标准签证照", "w": 35, "h": 45, "dpi": 300, "bg": "#FFFFFF"},
+		"standard_33x48":   {"name": "标准护照照", "w": 33, "h": 48, "dpi": 300, "bg": "#FFFFFF"},
+	}
+	
+	cfg, ok := photoSpecs[spec]
+	if !ok {
+		logger.Printf("未知规格: %s, 使用默认", spec)
+		cfg = photoSpecs["standard_35x45"]
+	}
+	
+	logger.Printf("开始AI生成证件照, 规格: %s, 性别: %s, 订单号: %s", cfg["name"], gender, tok.OrderID)
+	
+	// ========== 调用 HivisionIDPhotos 生成 ==========
+	resultPath, err := callHivisionIDPhoto(uploadFullPath, cfg)
+	if err != nil {
+		logger.Printf("HivisionIDPhotos处理失败: %v", err)
+		os.Remove(uploadFullPath)
+		jsonResp(w, false, "AI生成失败: "+err.Error(), nil)
+		return
+	}
+	
+	// 移动到结果目录
+	finalPath := fmt.Sprintf("%d_%s_result.jpg", timestamp, randomID)
+	finalFullPath := ResultDir + finalPath
+	if err := os.Rename(resultPath, finalFullPath); err != nil {
+		logger.Printf("移动结果文件失败: %v", err)
+		os.Remove(uploadFullPath)
+		os.Remove(resultPath)
+		jsonResp(w, false, "保存结果失败", nil)
+		return
+	}
+	logger.Printf("证件照生成完成: %s", finalPath)
+	
+	// ========== 原子扣减Token次数 ==========
+	if err := consumeTokenInDB(token); err != nil {
+		logger.Printf("扣减Token失败: %v", err)
+	} else {
+		logger.Printf("Token次数扣减成功, 订单号: %s", tok.OrderID)
+	}
+	
+	// ========== 记录生成日志 ==========
+	_, err = db.Exec(`
+		INSERT INTO generation_logs (token, spec, gender, result_path, status)
+		VALUES (?, ?, ?, ?, 1)
+	`, token, spec, gender, finalPath)
+	if err != nil {
+		logger.Printf("记录生成日志失败: %v", err)
+	}
+	
+	os.Remove(uploadFullPath)
+	
+	tokUpdated, _ := verifyTokenFromDB(token)
+	remaining := 0
+	if tokUpdated != nil {
+		remaining = tokUpdated.Remaining
+	}
+	
+	jsonResp(w, true, "ok", map[string]interface{}{
+		"image":     "/claw/api/data/results/" + finalPath,
+		"remaining": remaining,
+		"spec":      cfg["name"],
+		"ai_used":   true,
+		"order_id":  tok.OrderID,
+	})
+}
+
+// 调用 HivisionIDPhotos API 生成证件照
+func callHivisionIDPhoto(imagePath string, cfg map[string]interface{}) (string, error) {
+	imageData := readFile(imagePath)
+	if imageData == nil {
+		return "", fmt.Errorf("读取图片失败")
+	}
+	base64Data := base64.StdEncoding.EncodeToString(imageData)
+
+	width := cfg["w"].(int)
+	height := cfg["h"].(int)
+	dpi := 300
+	if dpiVal, ok := cfg["dpi"].(int); ok {
+		dpi = dpiVal
+	}
+	widthPx := int(float64(width) / 25.4 * float64(dpi))
+	heightPx := int(float64(height) / 25.4 * float64(dpi))
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	writer.WriteField("input_image_base64", base64Data)
+	writer.WriteField("height", fmt.Sprintf("%d", heightPx))
+	writer.WriteField("width", fmt.Sprintf("%d", widthPx))
+	writer.WriteField("dpi", fmt.Sprintf("%d", dpi))
+	writer.WriteField("hd", "true")
+	writer.WriteField("whitening_strength", "0")
+	writer.WriteField("head_measure_ratio", "0.2")
+	writer.WriteField("head_height_ratio", "0.45")
+	writer.WriteField("top_distance_max", "0.12")
+	writer.WriteField("top_distance_min", "0.10")
+
+	writer.Close()
+
+	resp, err := http.Post("http://127.0.0.1:8090/idphoto", writer.FormDataContentType(), body)
+	if err != nil {
+		return "", fmt.Errorf("调用API失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("API返回错误: %d, %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %v", err)
+	}
+
+	if status, ok := result["status"].(bool); !ok || !status {
+		return "", fmt.Errorf("人脸检测失败，请确保照片中有清晰的正面人脸")
+	}
+
+	resultImageBase64, ok := result["image_base64_standard"].(string)
+	if !ok {
+		return "", fmt.Errorf("API返回格式错误")
+	}
+
+	imageBytes, err := base64.StdEncoding.DecodeString(resultImageBase64)
+	if err != nil {
+		return "", fmt.Errorf("解码图片失败: %v", err)
+	}
+
+	outputPath := strings.Replace(imagePath, filepath.Ext(imagePath), "_processed.jpg", 1)
+	if err := os.WriteFile(outputPath, imageBytes, 0644); err != nil {
+		return "", fmt.Errorf("保存图片失败: %v", err)
+	}
+
+	logger.Printf("HivisionIDPhotos处理完成: %s -> %s (%dx%d px)",
+		filepath.Base(imagePath), filepath.Base(outputPath), widthPx, heightPx)
+
+	return outputPath, nil
+}
+
+func randomString(n int) string {
+	b := make([]byte, n)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
+}
+
+func readFile(path string) []byte {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		logger.Printf("读取文件失败: %v", err)
+		return nil
+	}
+	return data
+}
+
+func main() {
+	if err := os.MkdirAll(UploadDir, 0755); err != nil {
+		log.Printf("创建上传目录失败: %v", err)
+	}
+	if err := os.MkdirAll(ResultDir, 0755); err != nil {
+		log.Printf("创建结果目录失败: %v", err)
+	}
+	
+	logger.Printf("========================================")
+	logger.Printf("Photo ID Service 启动成功")
+	logger.Printf("监听端口: %s", Port)
+	logger.Printf("上传目录: %s", UploadDir)
+	logger.Printf("结果目录: %s", ResultDir)
+	logger.Printf("AI引擎: HivisionIDPhotos @ :8090")
+	logger.Printf("========================================")
+	
+	http.HandleFunc("/api/verify-token", corsMiddleware(verifyToken))
+	http.HandleFunc("/api/create-token", corsMiddleware(createToken))
+	http.HandleFunc("/api/generate-photo", corsMiddleware(generatePhoto))
+	http.HandleFunc("/api/webhook/order", corsMiddleware(webhookOrderHandler))
+	
+	logger.Printf("服务已就绪，等待请求...")
+	logger.Fatal(http.ListenAndServe(Port, nil))
+}
