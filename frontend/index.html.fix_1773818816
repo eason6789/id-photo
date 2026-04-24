@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI证件照生成器 - 智能美化证件照</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            width: 100%;
+            padding: 40px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+        }
+        .token-input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        input[type="text"], select {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        input[type="text"]:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s, opacity 0.3s;
+            font-weight: 600;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .token-info {
+            display: none;
+            padding: 15px;
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        .token-info.show {
+            display: block;
+        }
+        .token-info p {
+            margin: 5px 0;
+            color: #2e7d32;
+        }
+        .error {
+            display: none;
+            padding: 15px;
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            color: #c62828;
+        }
+        .error.show {
+            display: block;
+        }
+        .upload-area {
+            border: 3px dashed #ddd;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 20px;
+        }
+        .upload-area:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+        .upload-area.hidden {
+            display: none;
+        }
+        .upload-area.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+            display: none;
+            max-width: 100%;
+            max-height: 300px;
+            margin: 20px auto;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        .preview-image.show {
+            display: block;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 30px;
+        }
+        .loading.show {
+            display: block;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .result {
+            display: none;
+            text-align: center;
+        }
+        .result.show {
+            display: block;
+        }
+        .result-image {
+            max-width: 100%;
+            max-height: 500px;
+            margin: 20px auto;
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+        }
+        .download-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            margin-top: 20px;
+            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 AI证件照生成器</h1>
+        <p class="subtitle">专业 · 快速 · 智能美化</p>
+
+        <!-- Token验证区 -->
+        <div class="section">
+            <div class="section-title">📝 第一步：验证访问令牌</div>
+            <div class="token-input-group">
+                <input type="text" id="tokenInput" placeholder="请输入您的访问令牌 (TOKEN)">
+                <button id="verifyBtn" onclick="verifyToken()">验证</button>
+            </div>
+            <div id="tokenInfo" class="token-info"></div>
+            <div id="error" class="error"></div>
+        </div>
+
+        <!-- 上传和生成区 -->
+        <div class="section" id="uploadSection" style="opacity: 0.5; pointer-events: none;">
+            <div class="section-title">📸 第二步：上传照片并选择规格</div>
+            
+            <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+                <p>📁 点击或拖拽上传照片</p>
+                <p style="color: #999; font-size: 14px; margin-top: 10px;">支持 JPG、PNG 格式</p>
+            </div>
+            <input type="file" id="fileInput" accept="image/jpeg,image/jpg,image/png" style="display: none;" onchange="handleFileSelect(event)">
+            <img id="previewImage" class="preview-image">
+
+            <div class="form-group">
+                <label for="specSelect">证件照规格:</label>
+                <select id="specSelect">
+                    <option value="cn_passport">中国护照 (33x48mm)</option>
+                    <option value="cn_id">中国身份证 (26x32mm)</option>
+                    <option value="cn_one_inch">一寸照片 (25x35mm)</option>
+                    <option value="cn_two_inch">二寸照片 (35x49mm)</option>
+                    <option value="cn_small_one_inch">小一寸 (22x32mm)</option>
+                    <option value="cn_small_two_inch">小二寸 (35x45mm)</option>
+                    <option value="cn_big_two_inch">大二寸 (35x53mm)</option>
+                    <option value="cn_one_inch_blue">一寸蓝底 (25x35mm)</option>
+                    <option value="cn_one_inch_red">一寸红底 (25x35mm)</option>
+                    <option value="cn_two_inch_blue">二寸蓝底 (35x49mm)</option>
+                    <option value="cn_two_inch_red">二寸红底 (35x49mm)</option>
+                    <option value="cn_driver_license">驾驶证 (22x32mm)</option>
+                    <option value="us_passport">美国护照 (51x51mm)</option>
+                    <option value="us_visa">美国签证 (51x51mm)</option>
+                    <option value="jp_passport">日本护照 (45x45mm)</option>
+                    <option value="jp_visa">日本签证 (45x45mm)</option>
+                    <option value="jp_visa_rect">日本签证矩形 (35x45mm)</option>
+                    <option value="schengen_visa">申根签证 (35x45mm)</option>
+                    <option value="uk_passport">英国护照 (35x45mm)</option>
+                    <option value="de_passport">德国护照 (35x45mm)</option>
+                    <option value="fr_passport">法国护照 (35x45mm)</option>
+                    <option value="ca_passport">加拿大护照 (50x70mm)</option>
+                    <option value="au_passport">澳大利亚护照 (35x45mm)</option>
+                    <option value="kr_passport">韩国护照 (35x45mm)</option>
+                    <option value="sg_passport">新加坡护照 (35x45mm)</option>
+                    <option value="standard_35x45" selected>标准签证照 (35x45mm)</option>
+                    <option value="standard_33x48">标准护照照 (33x48mm)</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="genderSelect">性别 (影响AI风格):</label>
+                <select id="genderSelect">
+                    <option value="female" selected>女</option>
+                    <option value="male">男</option>
+                </select>
+            </div>
+
+            <button id="generateBtn" onclick="generatePhoto()" disabled style="width: 100%; padding: 15px; font-size: 18px;">
+                🚀 开始生成证件照
+            </button>
+        </div>
+
+        <!-- 加载中 -->
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p style="color: #666; font-size: 16px;">AI正在生成中，请稍候...</p>
+            <p style="color: #999; font-size: 14px; margin-top: 10px;">⏱️ 预计需要 15-60 秒</p>
+        </div>
+
+        <!-- 结果展示 -->
+        <div id="result" class="result">
+            <h2 style="color: #4caf50; margin-bottom: 20px;">✨ 生成成功！</h2>
+            <img id="resultImage" class="result-image">
+            <br>
+            <a id="downloadLink" class="download-btn" download style="text-decoration: none; display: inline-block;">
+                📥 下载证件照
+            </a>
+            <p id="remainingInfo" style="margin-top: 20px; color: #666;"></p>
+            <button onclick="resetForm()" style="margin-top: 15px; background: #9e9e9e;">
+                🔄 继续生成
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = ''; // 空字符串，使用相对路径，走Nginx代理
+        let currentToken = '';
+        let selectedFile = null;
+
+        // 页面加载时检查URL参数
+        window.addEventListener('load', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const tokenFromUrl = urlParams.get('token');
+            if (tokenFromUrl) {
+                document.getElementById('tokenInput').value = tokenFromUrl;
+                verifyToken();
+            }
+        });
+
+        function showError(msg) {
+            const errorEl = document.getElementById('error');
+            errorEl.textContent = msg;
+            errorEl.classList.add('show');
+            setTimeout(() => errorEl.classList.remove('show'), 5000);
+        }
+
+        async function verifyToken() {
+            const token = document.getElementById('tokenInput').value.trim();
+            if (!token) {
+                showError('请输入TOKEN');
+                return;
+            }
+
+            const verifyBtn = document.getElementById('verifyBtn');
+            verifyBtn.disabled = true;
+            verifyBtn.textContent = '验证中...';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/verify-token?token=${encodeURIComponent(token)}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    currentToken = token;
+                    const info = data.data;
+                    const expiresDate = info.expires_at > 0 ? new Date(info.expires_at * 1000).toLocaleString('zh-CN') : '永久有效';
+                    
+                    document.getElementById('tokenInfo').innerHTML = `
+                        <p><strong>✅ 验证成功！</strong></p>
+                        <p>剩余次数: <strong>${info.remaining}</strong> / ${info.max_uses}</p>
+                        ${info.order_id ? `<p>订单号: ${info.order_id}</p>` : ''}
+                        <p>有效期至: ${expiresDate}</p>
+                    `;
+                    document.getElementById('tokenInfo').classList.add('show');
+                    
+                    // 解锁上传和生成区域
+                    document.getElementById('uploadSection').style.opacity = '1';
+                    document.getElementById('uploadSection').style.pointerEvents = 'auto';
+                } else {
+                    showError(data.message || 'Token验证失败');
+                }
+            } catch (error) {
+                console.error('验证失败:', error);
+                showError('网络错误，请稍后重试');
+            } finally {
+                verifyBtn.disabled = false;
+                verifyBtn.textContent = '验证';
+            }
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (!file.type.match('image/(jpeg|jpg|png)')) {
+                showError('只支持 JPG 和 PNG 格式');
+                return;
+            }
+
+            if (file.size > 50 * 1024 * 1024) {
+                showError('图片大小不能超过 50MB');
+                return;
+            }
+
+            selectedFile = file;
+            
+            // 预览图片
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const previewImage = document.getElementById('previewImage');
+                previewImage.src = e.target.result;
+                previewImage.classList.add('show');
+                // 隐藏上传框
+                document.getElementById('uploadArea').classList.add('hidden');
+            };
+            reader.readAsDataURL(file);
+
+            // 启用生成按钮
+            document.getElementById('generateBtn').disabled = false;
+        }
+
+        async function generatePhoto() {
+            if (!currentToken) {
+                showError('请先验证TOKEN');
+                return;
+            }
+
+            if (!selectedFile) {
+                showError('请先上传照片');
+                return;
+            }
+
+            const spec = document.getElementById('specSelect').value;
+            const gender = document.getElementById('genderSelect').value;
+
+            const formData = new FormData();
+            formData.append('token', currentToken);
+            formData.append('image', selectedFile);
+            formData.append('spec', spec);
+            formData.append('gender', gender);
+
+            // 显示加载
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('loading').classList.add('show');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/generate-photo`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    // 显示结果
+                    document.getElementById('loading').classList.remove('show');
+                    const resultImage = document.getElementById('resultImage');
+                    resultImage.src = data.data.image;
+                    
+                    const downloadLink = document.getElementById('downloadLink');
+                    downloadLink.href = data.data.image;
+                    downloadLink.download = `证件照_${Date.now()}.jpg`;
+                    
+                    document.getElementById('remainingInfo').textContent = 
+                        `剩余生成次数: ${data.data.remaining}`;
+                    
+                    document.getElementById('result').classList.add('show');
+                } else {
+                    document.getElementById('loading').classList.remove('show');
+                    document.getElementById('uploadSection').style.display = 'block';
+                    showError(data.message || '生成失败，请重试');
+                }
+            } catch (error) {
+                console.error('生成失败:', error);
+                document.getElementById('loading').classList.remove('show');
+                document.getElementById('uploadSection').style.display = 'block';
+                showError('网络错误，请稍后重试');
+            }
+        }
+
+        function resetForm() {
+            document.getElementById('result').classList.remove('show');
+            document.getElementById('uploadSection').style.display = 'block';
+            document.getElementById('previewImage').classList.remove('show');
+            document.getElementById('fileInput').value = '';
+            document.getElementById('generateBtn').disabled = true;
+            selectedFile = null;
+            
+            // 重新验证token以刷新剩余次数
+            verifyToken();
+        }
+
+        // 拖拽上传
+        const uploadArea = document.getElementById('uploadArea');
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#667eea';
+            uploadArea.style.background = '#f8f9ff';
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.style.borderColor = '#ddd';
+            uploadArea.style.background = 'transparent';
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#ddd';
+            uploadArea.style.background = 'transparent';
+            
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                document.getElementById('fileInput').files = e.dataTransfer.files;
+                handleFileSelect({ target: { files: [file] } });
+            }
+        });
+    </script>
+</body>
+</html>
