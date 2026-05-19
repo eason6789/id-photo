@@ -32,6 +32,9 @@ func cosUpload(data []byte, key, contentType string) (string, error) {
 		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
 			ContentType: contentType,
 		},
+		ACLHeaderOptions: &cos.ACLHeaderOptions{
+			XCosACL: "public-read",
+		},
 	}
 	_, err := client.Object.Put(context.Background(), key, bytes.NewReader(data), opt)
 	if err != nil {
@@ -46,6 +49,9 @@ func cosUploadReader(reader io.Reader, key, contentType string) (string, error) 
 	opt := &cos.ObjectPutOptions{
 		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
 			ContentType: contentType,
+		},
+		ACLHeaderOptions: &cos.ACLHeaderOptions{
+			XCosACL: "public-read",
 		},
 	}
 	_, err := client.Object.Put(context.Background(), key, reader, opt)
