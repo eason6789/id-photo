@@ -17,23 +17,18 @@
 
 ### 前端
 
-```bash
-# 上传前端文件
-cd /Users/easonlv/Code/backend/id-photo
-scp -r frontend/. root@119.29.178.222:/root/project/portfolio-home/src/claw/photo/
-```
+将 `frontend/` 目录下的文件部署到服务器的 `/root/project/portfolio-home/src/claw/photo/` 路径。
 
 ### 后端服务
 
-```bash
-# 后端已编译的二进制文件在服务器上
-# 位置: /root/photo-service/photo-service
+后端二进制文件位于服务器 `/root/photo-service/photo-service`，通过 systemd 管理：
 
+```bash
 # 查看服务状态
-ssh root@119.29.178.222 "ps aux | grep photo-service | grep -v grep"
+systemctl status photo-service
 
 # 重启服务
-ssh root@119.29.178.222 "systemctl restart photo-service"
+systemctl restart photo-service
 ```
 
 ### API 代理
@@ -64,74 +59,46 @@ location /claw/api/data/results/ {
 
 ### 前端部署
 
-```bash
-# 1. 本地上传前端文件
-cd /Users/easonlv/Code/backend/id-photo
-scp -r frontend/. root@119.29.178.222:/root/project/portfolio-home/src/claw/photo/
-
-# 2. SSH 到服务器验证
-ssh root@119.29.178.222 "ls -la /root/project/portfolio-home/src/claw/photo/"
-```
+1. 上传前端文件到服务器目标路径
+2. 在服务器上验证文件已就位
 
 ### 后端部署
 
-```bash
-# 1. 编译 Go 项目
-cd /Users/easonlv/Code/backend/id-photo
-go build -o photo-service main.go
-
-# 2. 上传二进制文件
-scp photo-service root@119.29.178.222:/root/photo-service/
-
-# 3. SSH 到服务器重启服务
-ssh root@119.29.178.222 "systemctl restart photo-service"
-```
+1. 本地编译 Go 项目：`go build -o photo-service main.go`
+2. 上传编译好的二进制文件到服务器
+3. 重启服务：`systemctl restart photo-service`
 
 ### 完整更新流程
 
-```bash
-# 前端更新
-cd /Users/easonlv/Code/backend/id-photo
-scp -r frontend/. root@119.29.178.222:/root/project/portfolio-home/src/claw/photo/
-
-# 后端更新（如需要）
-go build -o photo-service main.go
-scp photo-service root@119.29.178.222:/root/photo-service/
-
-# SSH 到服务器
-ssh root@119.29.178.222
-
-# 重启服务
-systemctl restart photo-service
-
-# 重启 Nginx
-nginx -s reload
-```
+1. 更新前端文件并上传
+2. 如后端代码有变更，重新编译并上传
+3. 重启服务：`systemctl restart photo-service`
+4. 重载 Nginx：`nginx -s reload`
 
 ## 维护命令
 
 ### 查看服务状态
 
 ```bash
-ssh root@119.29.178.222 "ps aux | grep photo-service | grep -v grep"
+ps aux | grep photo-service | grep -v grep
 ```
 
 ### 查看服务日志
 
 ```bash
-ssh root@119.29.178.222 "journalctl -u photo-service -f"
+journalctl -u photo-service -f
 ```
 
 ### 重启服务
 
 ```bash
-ssh root@119.29.178.222 "systemctl restart photo-service && systemctl status photo-service"
+systemctl restart photo-service && systemctl status photo-service
 ```
 
 ### 查看端口
 
 ```bash
-ssh root@119.29.178.222 "netstat -tlnp | grep 8080"
+netstat -tlnp | grep 8080
 ```
 
 ## 注意事项

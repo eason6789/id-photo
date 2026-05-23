@@ -4,9 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"time"
-	
+
 	"net/http"
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -16,7 +17,13 @@ var tokensLock sync.RWMutex
 var db *sql.DB
 
 func initDB() error {
-	dsn := "root:OpenClaw2026!@tcp(127.0.0.1:3306)/wish_plan?charset=utf8mb4&parseTime=true&loc=Asia%2FShanghai"
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=true&loc=Asia%%2FShanghai",
+		getEnvDefault("DB_USER", "root"),
+		getEnvDefault("DB_PASSWORD", "change-me"),
+		getEnvDefault("DB_HOST", "127.0.0.1"),
+		getEnvDefault("DB_PORT", "3306"),
+		getEnvDefault("DB_NAME", "wish_plan"),
+	)
 	var err error
 	db, err = sql.Open("mysql", dsn)
 	if err != nil {
@@ -209,6 +216,13 @@ func consumeTokenInDB(tokenStr string) error {
 	}
 	
 	return nil
+}
+
+func getEnvDefault(key, fallback string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return fallback
 }
 
 func nullString(s string) interface{} {

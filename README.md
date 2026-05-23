@@ -194,9 +194,8 @@ curl http://127.0.0.1:8090/specs
 ## 注意事项
 
 1. **API Key管理**
-   - 主Key: `sk-4dc49306c54f4ae195919ca4f58c6846`
-   - 备用Key: `sk-c501568d88654adfbb88cf648fd95c0e`
-   - 写在代码中，生产环境建议改为环境变量
+   - 通过环境变量 `DASHSCOPE_API_KEY` 配置
+   - 参考 `.env.example` 文件设置所有必要的环境变量
 
 2. **生成时间**
    - AI生图约 8-15秒（阿里百炼异步API）

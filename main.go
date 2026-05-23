@@ -20,8 +20,15 @@ const (
 	Port       = ":8080"
 	UploadDir  = "/var/www/html/claw/api/data/uploads/"
 	ResultDir  = "/var/www/html/claw/api/data/results/"
-	AdminPwd   = "tuoluo704540"
+	AdminPwd   = "" // deprecated, use getAdminPassword() instead
 )
+
+func getAdminPassword() string {
+	if pwd := os.Getenv("ADMIN_PASSWORD"); pwd != "" {
+		return pwd
+	}
+	return "change-me-in-production"
+}
 
 type Token struct {
 	Remaining  int    `json:"remaining"`
@@ -122,7 +129,7 @@ func createToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	password := r.URL.Query().Get("password")
-	if password != AdminPwd {
+	if password != getAdminPassword() {
 		logger.Printf("管理员密码错误")
 		jsonResp(w, false, "管理员密码错误", nil)
 		return
