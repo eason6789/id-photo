@@ -9,7 +9,7 @@ import uvicorn
 app = FastAPI(title="AI证件照", version="7.0")
 
 # ---- Config ----
-DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "YOUR_KEY")
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "YOUR_DASHSCOPE_API_KEY")
 COS_SECRET_ID = os.getenv("COS_SECRET_ID", "YOUR_COS_SECRET_ID")
 COS_SECRET_KEY = os.getenv("COS_SECRET_KEY", "YOUR_COS_SECRET_KEY")
 COS_BUCKET = os.getenv("COS_BUCKET", "top-comm-1251416377")
