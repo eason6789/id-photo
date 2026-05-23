@@ -7,7 +7,7 @@ import uvicorn
 
 app = FastAPI(title="AI证件照", version="6.0")
 
-DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "your-api-key-here")
+DASHSCOPE_API_KEY = os.environ["DASHSCOPE_API_KEY"]
 WANX_API_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
 
 # 提示词
