@@ -172,7 +172,7 @@ POST https://aip.baidubce.com/rest/2.0/image-process/v1/portrait_seg
 #### 步骤 1: 部署 HivisionIDPhotos
 ```bash
 # 在服务器上部署
-ssh root@119.29.178.222
+ssh <user>@<server_ip>
 
 # 安装 Python 环境（如果没有）
 apt-get update && apt-get install python3-pip python3-venv -y
