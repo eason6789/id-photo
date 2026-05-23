@@ -51,30 +51,11 @@ func loadConfig() error {
 		}
 	}
 	if err != nil {
-		// Fall back to embedded defaults
-		logger.Printf("未找到配置文件, 使用默认配置")
-		setDefaults()
-		return nil
+		return fmt.Errorf("未找到配置文件，请设置 config.json 或 config/config.%s.json", env)
 	}
 
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("解析配置失败: %w", err)
 	}
 	return nil
-}
-
-func setDefaults() {
-	cfg = Config{
-		Port:       ":8080",
-		Env:        "dev",
-		AdminPwd:   "YOUR_ADMIN_PWD",
-		DB:         "root:YOUR_DB_PASSWORD@tcp(127.0.0.1:3306)/wish_plan?charset=utf8mb4&parseTime=true&loc=Asia%2FShanghai",
-		COSBucket:  "single-az-1251416377",
-		COSRegion:  "ap-guangzhou",
-		COSSecretID:  "YOUR_COS_SECRET_ID",
-		COSSecretKey: "YOUR_COS_SECRET_KEY",
-		FaceChainTemplateMale:   "",
-		FaceChainTemplateFemale: "",
-		HivisionURL: "http://127.0.0.1:8090/idphoto",
-	}
 }
