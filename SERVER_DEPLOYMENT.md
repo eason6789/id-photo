@@ -7,7 +7,7 @@
 
 ## 服务器配置
 
-- **前端路径**: `/root/project/portfolio-home/src/claw/photo/`
+- **前端路径**: `/var/www/id-photo/`
 - **后端服务**: `photo-service` (Go 语言，监听 8080)
 - **服务目录**: `/root/photo-service/`
 - **结果存储**: `/var/www/html/claw/api/data/results/`
@@ -20,7 +20,7 @@
 ```bash
 # 上传前端文件
 cd /Users/easonlv/Code/backend/id-photo
-scp -r frontend/. root@119.29.178.222:/root/project/portfolio-home/src/claw/photo/
+scp -r frontend/. root@119.29.178.222:/var/www/id-photo/
 ```
 
 ### 后端服务
@@ -67,10 +67,10 @@ location /claw/api/data/results/ {
 ```bash
 # 1. 本地上传前端文件
 cd /Users/easonlv/Code/backend/id-photo
-scp -r frontend/. root@119.29.178.222:/root/project/portfolio-home/src/claw/photo/
+scp -r frontend/. root@119.29.178.222:/var/www/id-photo/
 
 # 2. SSH 到服务器验证
-ssh root@119.29.178.222 "ls -la /root/project/portfolio-home/src/claw/photo/"
+ssh root@119.29.178.222 "ls -la /var/www/id-photo/"
 ```
 
 ### 后端部署
@@ -92,7 +92,7 @@ ssh root@119.29.178.222 "systemctl restart photo-service"
 ```bash
 # 前端更新
 cd /Users/easonlv/Code/backend/id-photo
-scp -r frontend/. root@119.29.178.222:/root/project/portfolio-home/src/claw/photo/
+scp -r frontend/. root@119.29.178.222:/var/www/id-photo/
 
 # 后端更新（如需要）
 go build -o photo-service main.go
