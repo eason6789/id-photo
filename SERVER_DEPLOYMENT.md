@@ -76,36 +76,48 @@ ssh root@119.29.178.222 "ls -la /var/www/id-photo/"
 ### 后端部署
 
 ```bash
-# 1. 编译 Go 项目
+# ⚠️ 禁止从本地上传二进制！Mac ARM → Linux x86_64 不兼容，会导致 Exec format error
+# 必须在服务器上编译：
+
+# 1. 先在本地推送代码
 cd /Users/easonlv/Code/backend/id-photo
-go build -o photo-service main.go
+git push origin main
 
-# 2. 上传二进制文件
-scp photo-service root@119.29.178.222:/root/photo-service/
+# 2. SSH 到服务器编译部署
+ssh root@119.29.178.222
+cd /root/photo-service
+git pull origin main
 
-# 3. SSH 到服务器重启服务
-ssh root@119.29.178.222 "systemctl restart photo-service"
+# 3. 编译前先备份当前运行中的二进制
+cp photo-service photo-service.prev
+
+# 4. 在服务器上编译
+go build -o photo-service .
+
+# 5. 重启服务
+systemctl restart photo-service
 ```
 
 ### 完整更新流程
 
 ```bash
-# 前端更新
+# === 前端更新 ===
 cd /Users/easonlv/Code/backend/id-photo
 scp -r frontend/. root@119.29.178.222:/var/www/id-photo/
 
-# 后端更新（如需要）
-go build -o photo-service main.go
-scp photo-service root@119.29.178.222:/root/photo-service/
+# === 后端更新 ===
+# 1. 推送代码
+git push origin main
 
-# SSH 到服务器
-ssh root@119.29.178.222
+# 2. 服务器上拉取、编译、重启
+ssh root@119.29.178.222 "cd /root/photo-service && \
+  git pull origin main && \
+  cp photo-service photo-service.prev && \
+  go build -o photo-service . && \
+  systemctl restart photo-service"
 
-# 重启服务
-systemctl restart photo-service
-
-# 重启 Nginx
-nginx -s reload
+# 3. 重载 Nginx（可选）
+ssh root@119.29.178.222 "nginx -s reload"
 ```
 
 ## 维护命令
@@ -143,4 +155,66 @@ ssh root@119.29.178.222 "netstat -tlnp | grep 8080"
 
 ---
 
-*最后更新: 2026-04-25*
+## 环境变量 & 配置文件
+
+### Go 后端 (photo-service)
+
+Go 服务通过 systemd 管理，环境变量在 `/etc/systemd/system/photo-service.service`：
+
+```ini
+Environment=DASHSCOPE_API_KEY=sk-xxx
+Environment=COS_SECRET_ID=AKIDxxx
+Environment=COS_SECRET_KEY=xxx
+Environment=ENV=prod
+```
+
+配置文件 `/root/photo-service/config/config.prod.json` **必须写真实值**，不能用 `${VAR}` 占位符（Go 代码直接 `json.Unmarshal`，不会展开环境变量）。
+
+### Python AI 服务 (ai_photo.py)
+
+环境变量在 `/etc/systemd/system/ai-photo.service`：
+
+```ini
+Environment=DASHSCOPE_API_KEY=sk-xxx
+Environment=COS_SECRET_ID=AKIDxxx
+Environment=COS_SECRET_KEY=xxx
+Environment=COS_BUCKET=single-az-1251416377
+Environment=COS_REGION=ap-guangzhou
+```
+
+### 更换密钥时的操作
+
+```bash
+# 1. 更新 systemd 环境变量
+vim /etc/systemd/system/photo-service.service   # 修改 Environment= 行
+vim /etc/systemd/system/ai-photo.service         # 修改 Environment= 行
+
+# 2. 更新 Go 服务配置 JSON（真实值）
+vim /root/photo-service/config/config.prod.json
+
+# 3. 重载并重启
+systemctl daemon-reload
+systemctl restart photo-service
+systemctl restart ai-photo
+```
+
+### 从崩溃恢复
+
+如果 `photo-service` 无法启动（`Exec format error`），说明二进制文件被错误覆盖。服务器上有备份：
+
+```bash
+# 检查文件格式
+file /root/photo-service/photo-service
+# 正确输出: ELF 64-bit LSB executable, x86-64
+# 错误输出: Mach-O 64-bit arm64 executable (macOS 二进制！)
+
+# 恢复备份
+cp /root/photo-service/photo-service.prev /root/photo-service/photo-service
+systemctl restart photo-service
+```
+
+关键规则：**永远在服务器上编译 Go 代码，禁止从本地上传二进制。**
+
+---
+
+*最后更新: 2026-05-28*
